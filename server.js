@@ -76,7 +76,33 @@ console.log("TikTok tokens stored successfully");
     res.status(500).send("TikTok token exchange failed.");
   }
 });
+app.get("/tiktok/me", async (req, res) => {
+  if (!tiktokAccessToken) {
+    return res.status(401).send("TikTok is not connected.");
+  }
 
+  try {
+    const response = await fetch(
+      "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,avatar_url",
+      {
+        headers: {
+          Authorization: `Bearer ${tiktokAccessToken}`,
+        },
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(response.status).json(data);
+    }
+
+    res.json(data);
+  } catch (err) {
+    console.error("TikTok user info error:", err);
+    res.status(500).send("Failed to retrieve TikTok account.");
+  }
+});
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Inaya backend running on port ${PORT}`);
 });
