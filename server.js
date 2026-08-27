@@ -19,7 +19,7 @@ app.get("/auth/tiktok", (req, res) => {
 
   res.redirect(authUrl);
 });
-app.get("/auth/tiktok/callback", (req, res) => {
+app.get("/auth/tiktok/callback", async (req, res) => {
   const { code, error, error_description } = req.query;
 
   if (error) {
@@ -32,9 +32,43 @@ app.get("/auth/tiktok/callback", (req, res) => {
     return res.status(400).send("Missing TikTok authorization code.");
   }
 
-  res.send(
-    "TikTok authorization received successfully. You can close this page."
-  );
+  try {
+    const params = new URLSearchParams();
+
+    params.append("client_key", process.env.TIKTOK_CLIENT_KEY);
+    params.append("client_secret", process.env.TIKTOK_CLIENT_SECRET);
+    params.append("code", code);
+    params.append("grant_type", "authorization_code");
+    params.append(
+      "redirect_uri",
+      "https://inaya.onrender.com/auth/tiktok/callback"
+    );
+
+    const response = await fetch(
+      "https://open.tiktokapis.com/v2/oauth/token/",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params,
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("TikTok token error:", data);
+      return res.status(400).json(data);
+    }
+
+    console.log("TikTok token received successfully");
+
+    res.send("TikTok connected successfully. Access token received.");
+  } catch (err) {
+    console.error("TikTok token exchange error:", err);
+    res.status(500).send("TikTok token exchange failed.");
+  }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
