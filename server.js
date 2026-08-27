@@ -6,7 +6,19 @@ const PORT = process.env.PORT || 10000;
 app.get("/", (req, res) => {
   res.send("Inaya TikTok backend is running.");
 });
+app.get("/auth/tiktok", (req, res) => {
+  const clientKey = process.env.TIKTOK_CLIENT_KEY;
+  const redirectUri = "https://inaya.onrender.com/auth/tiktok/callback";
 
+  const authUrl =
+    "https://www.tiktok.com/v2/auth/authorize/" +
+    "?client_key=" + encodeURIComponent(clientKey) +
+    "&scope=user.info.basic,video.upload,video.publish" +
+    "&response_type=code" +
+    "&redirect_uri=" + encodeURIComponent(redirectUri);
+
+  res.redirect(authUrl);
+});
 app.get("/auth/tiktok/callback", (req, res) => {
   const { code, error, error_description } = req.query;
 
