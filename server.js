@@ -2,7 +2,8 @@ import express from "express";
 
 const app = express();
 const PORT = process.env.PORT || 10000;
-
+let tiktokAccessToken = null;
+let tiktokRefreshToken = null;
 app.get("/", (req, res) => {
   res.send("Inaya TikTok backend is running.");
 });
@@ -61,6 +62,11 @@ app.get("/auth/tiktok/callback", async (req, res) => {
       console.error("TikTok token error:", data);
       return res.status(400).json(data);
     }
+
+    tiktokAccessToken = data.access_token;
+tiktokRefreshToken = data.refresh_token;
+
+console.log("TikTok tokens stored successfully");
 
     console.log("TikTok token received successfully");
 
