@@ -13,7 +13,7 @@ app.get("/auth/tiktok", (req, res) => {
   const authUrl =
     "https://www.tiktok.com/v2/auth/authorize/" +
     "?client_key=" + encodeURIComponent(clientKey) +
-    "&scope=user.info.basic,video.upload,video.publish" +
+   "&scope=user.info.basic,video.upload" +
     "&response_type=code" +
     "&redirect_uri=" + encodeURIComponent(redirectUri);
 
