@@ -8,6 +8,7 @@ import { requireApiKey } from "./src/middleware/apiKey.js";
 import { TikTokClient } from "./src/tiktok/client.js";
 import { publicError, TikTokApiError } from "./src/tiktok/errors.js";
 import { MAX_VIDEO_SIZE } from "./src/tiktok/uploadPlan.js";
+import { createUploadWorkflow } from "./src/tiktok/uploadWorkflow.js";
 import { PostgresTokenStore } from "./src/tokens/postgresTokenStore.js";
 
 const app = express();
@@ -16,6 +17,8 @@ const redirectUri = process.env.TIKTOK_REDIRECT_URI || "https://inaya.onrender.c
 const uploadDirectory = path.join(tmpdir(), "inaya-tiktok-uploads");
 const configuredMaxSize = Number(process.env.MAX_VIDEO_SIZE_BYTES) || MAX_VIDEO_SIZE;
 const maxVideoSize = Math.min(configuredMaxSize, MAX_VIDEO_SIZE);
+const statusPollIntervalMs = Number(process.env.TIKTOK_STATUS_POLL_INTERVAL_MS) || 5_000;
+const statusTimeoutMs = Number(process.env.TIKTOK_STATUS_TIMEOUT_MS) || 300_000;
 const oauthStates = new Map();
 const tokenStore = new PostgresTokenStore({
   connectionString: process.env.DATABASE_URL,
@@ -26,6 +29,11 @@ const tiktok = new TikTokClient({
   tokenStore,
   clientKey: process.env.TIKTOK_CLIENT_KEY,
   clientSecret: process.env.TIKTOK_CLIENT_SECRET,
+});
+const uploadWorkflow = createUploadWorkflow({
+  tiktok,
+  pollIntervalMs: statusPollIntervalMs,
+  timeoutMs: statusTimeoutMs,
 });
 
 await mkdir(uploadDirectory, { recursive: true });
@@ -91,6 +99,19 @@ app.get("/tiktok/me", async (req, res) => {
   }
 });
 
+async function validateMp4Container(filePath) {
+  const handle = await open(filePath, "r");
+  try {
+    const signature = Buffer.alloc(8);
+    await handle.read(signature, 0, 8, 0);
+    if (signature.subarray(4, 8).toString("ascii") !== "ftyp") {
+      throw new TikTokApiError("The uploaded file is not a valid MP4 container.", { status: 415, code: "invalid_mp4" });
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
 app.post(
   "/tiktok/videos/upload",
   requireApiKey(process.env.INAYA_API_KEY),
@@ -98,20 +119,63 @@ app.post(
   async (req, res) => {
     if (!req.file) return res.status(400).json({ error: { code: "missing_video", message: "MP4 field 'video' is required." } });
     try {
-      const handle = await open(req.file.path, "r");
-      try {
-        const signature = Buffer.alloc(8);
-        await handle.read(signature, 0, 8, 0);
-        if (signature.subarray(4, 8).toString("ascii") !== "ftyp") {
-          throw new TikTokApiError("The uploaded file is not a valid MP4 container.", { status: 415, code: "invalid_mp4" });
-        }
-      } finally {
-        await handle.close();
-      }
+      await validateMp4Container(req.file.path);
       const result = await tiktok.uploadVideoFile({ filePath: req.file.path, mimeType: "video/mp4", videoSize: req.file.size });
       res.status(202).json({ data: result });
     } catch (err) {
       console.error("TikTok upload error:", err.message);
+      res.status(err.status || 500).json(publicError(err));
+    } finally {
+      await unlink(req.file.path).catch(() => {});
+    }
+  },
+);
+
+app.post(
+  "/tiktok/videos/upload-and-wait",
+  requireApiKey(process.env.INAYA_API_KEY),
+  upload.single("video"),
+  async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: { code: "missing_video", message: "MP4 field 'video' is required." } });
+    try {
+      await validateMp4Container(req.file.path);
+      const result = await uploadWorkflow.uploadAndWait({
+        filePath: req.file.path,
+        mimeType: "video/mp4",
+        videoSize: req.file.size,
+      });
+      const data = {
+        publish_id: result.publishId,
+        status: result.status,
+        attempts: result.attempts,
+        elapsed_ms: result.elapsedMs,
+      };
+
+      if (result.outcome === "complete") return res.json({ data });
+      if (result.outcome === "failed") {
+        return res.status(422).json({
+          data,
+          error: {
+            code: "tiktok_publish_failed",
+            message: "TikTok could not process the uploaded video.",
+            retryable: result.statusData?.fail_reason === "internal",
+            ...(result.statusData?.fail_reason ? { fail_reason: result.statusData.fail_reason } : {}),
+          },
+        });
+      }
+      if (result.outcome === "timeout") {
+        return res.status(504).json({
+          data,
+          error: {
+            code: "status_timeout",
+            message: "TikTok processing did not reach a final state before the timeout.",
+            retryable: true,
+          },
+        });
+      }
+      return res.status(result.error?.status || 502).json({ data, ...publicError(result.error) });
+    } catch (err) {
+      console.error("TikTok upload workflow error:", err.message);
       res.status(err.status || 500).json(publicError(err));
     } finally {
       await unlink(req.file.path).catch(() => {});
