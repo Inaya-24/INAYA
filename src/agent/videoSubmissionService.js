@@ -17,7 +17,7 @@ export function createVideoSubmissionService({
     let record = claim.record;
     try {
       const result = record.publishId
-        ? await workflow.waitForFinalStatus(record.publishId, "PROCESSING_UPLOAD")
+        ? await workflow.waitForFinalStatus(record.publishId, record.lastTikTokStatus || "PROCESSING_UPLOAD")
         : await workflow.uploadAndWait(uploadOptions, {
           async onUploaded(upload) {
             record = await store.markUploaded(videoFingerprint, upload.publish_id);
@@ -25,7 +25,7 @@ export function createVideoSubmissionService({
         });
 
       if (result.outcome === "complete") {
-        record = await store.markComplete(videoFingerprint, result.status);
+        record = await store.markComplete(videoFingerprint, result.status, result.attempts);
         return { outcome: "complete", record, workflow: result };
       }
       if (result.outcome === "failed") {
@@ -34,11 +34,13 @@ export function createVideoSubmissionService({
           code: "tiktok_publish_failed",
           message: failReason || "TikTok could not process the uploaded video.",
           retryable: false,
+          lastTikTokStatus: result.status,
+          statusChecks: result.attempts,
         });
         return { outcome: "failed", record, workflow: result, failReason };
       }
       if (result.outcome === "timeout") {
-        record = await store.markTimedOut(videoFingerprint);
+        record = await store.markTimedOut(videoFingerprint, result.status, result.attempts);
         return { outcome: "timeout", record, workflow: result };
       }
 
@@ -47,6 +49,8 @@ export function createVideoSubmissionService({
         code: error?.code || "tiktok_status_error",
         message: error?.message || "TikTok status check failed.",
         retryable: Boolean(error?.retryable),
+        lastTikTokStatus: result.status,
+        statusChecks: result.attempts,
       });
       return { outcome: "error", record, workflow: result, error };
     } catch (error) {

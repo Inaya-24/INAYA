@@ -20,6 +20,8 @@ object. `TIKTOK_STATUS_POLL_INTERVAL_MS` defaults to 5000 milliseconds and
 MP4 video. It accepts an authenticated `multipart/form-data` request with the file in the
 `video` field. The service fingerprints the file, atomically reserves the submission in
 PostgreSQL, runs the existing TikTok upload-and-wait workflow, and stores the final result.
+Agent responses expose `submission_attempts`, `status_checks`, and `tiktok_status` separately
+so submission retries cannot be confused with TikTok status polling.
 
 Submitting identical video bytes again returns the existing result instead of uploading a
 second time. If the process restarts after TikTok returns a `publish_id`, a later submission

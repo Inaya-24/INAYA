@@ -8,6 +8,8 @@ function mapRow(row) {
     errorMessage: row.error_message,
     retryable: row.retryable,
     attempts: row.attempt_count,
+    lastTikTokStatus: row.last_tiktok_status,
+    statusChecks: row.status_check_count,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     completedAt: row.completed_at,
@@ -31,11 +33,18 @@ export class PostgresVideoSubmissionStore {
         error_message TEXT,
         retryable BOOLEAN NOT NULL DEFAULT FALSE,
         attempt_count INTEGER NOT NULL DEFAULT 1,
+        last_tiktok_status TEXT,
+        status_check_count INTEGER,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         completed_at TIMESTAMPTZ,
         lease_expires_at TIMESTAMPTZ NOT NULL
       )
+    `);
+    await this.pool.query(`
+      ALTER TABLE video_submissions
+        ADD COLUMN IF NOT EXISTS last_tiktok_status TEXT,
+        ADD COLUMN IF NOT EXISTS status_check_count INTEGER
     `);
   }
 
@@ -50,6 +59,7 @@ export class PostgresVideoSubmissionStore {
          error_message = NULL,
          retryable = FALSE,
          attempt_count = video_submissions.attempt_count + 1,
+         status_check_count = NULL,
          updated_at = NOW(),
          completed_at = NULL,
          lease_expires_at = NOW() + $2 * INTERVAL '1 millisecond'
@@ -69,33 +79,43 @@ export class PostgresVideoSubmissionStore {
 
   async markUploaded(fingerprint, publishId) {
     return this.#update(
-      `status = 'PROCESSING', publish_id = $2, updated_at = NOW()`,
+      `status = 'PROCESSING', publish_id = $2, last_tiktok_status = 'PROCESSING_UPLOAD',
+       status_check_count = NULL, updated_at = NOW()`,
       [fingerprint, publishId],
     );
   }
 
-  async markComplete(fingerprint, status) {
+  async markComplete(fingerprint, status, statusChecks) {
     return this.#update(
-      `status = $2, retryable = FALSE, updated_at = NOW(), completed_at = NOW()`,
-      [fingerprint, status],
+      `status = $2, last_tiktok_status = $2, status_check_count = $3,
+       retryable = FALSE, updated_at = NOW(), completed_at = NOW()`,
+      [fingerprint, status, statusChecks],
     );
   }
 
-  async markFailed(fingerprint, { code, message, retryable = false }) {
+  async markFailed(fingerprint, {
+    code,
+    message,
+    retryable = false,
+    lastTikTokStatus = null,
+    statusChecks = null,
+  }) {
     const status = retryable ? "RETRYABLE_ERROR" : "FAILED";
     return this.#update(
       `status = $2, error_code = $3, error_message = $4, retryable = $5,
+       last_tiktok_status = COALESCE($6, last_tiktok_status), status_check_count = $7,
        updated_at = NOW(), completed_at = NOW()`,
-      [fingerprint, status, code, message, retryable],
+      [fingerprint, status, code, message, retryable, lastTikTokStatus, statusChecks],
     );
   }
 
-  async markTimedOut(fingerprint) {
+  async markTimedOut(fingerprint, lastTikTokStatus, statusChecks) {
     return this.#update(
       `status = 'TIMED_OUT', error_code = 'status_timeout',
        error_message = 'TikTok processing did not reach a final state before the timeout.',
-       retryable = TRUE, updated_at = NOW(), completed_at = NOW()`,
-      [fingerprint],
+       retryable = TRUE, last_tiktok_status = $2, status_check_count = $3,
+       updated_at = NOW(), completed_at = NOW()`,
+      [fingerprint, lastTikTokStatus, statusChecks],
     );
   }
 

@@ -5,6 +5,7 @@ import path from "node:path";
 import express from "express";
 import multer from "multer";
 import { PostgresVideoSubmissionStore } from "./src/agent/postgresVideoSubmissionStore.js";
+import { agentSubmissionData } from "./src/agent/submissionResponse.js";
 import { createVideoSubmissionService } from "./src/agent/videoSubmissionService.js";
 import { requireApiKey } from "./src/middleware/apiKey.js";
 import { TikTokClient } from "./src/tiktok/client.js";
@@ -192,20 +193,6 @@ app.post(
     }
   },
 );
-
-function agentSubmissionData(result) {
-  const { record } = result;
-  return {
-    status: record.status,
-    publish_id: record.publishId || null,
-    duplicate: result.outcome === "duplicate",
-    attempts: record.attempts,
-    status_checks: result.workflow?.attempts || null,
-    created_at: record.createdAt,
-    updated_at: record.updatedAt,
-    completed_at: record.completedAt || null,
-  };
-}
 
 app.post(
   "/agent/videos/submit",

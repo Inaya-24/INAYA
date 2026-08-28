@@ -14,23 +14,50 @@ class MemorySubmissionStore {
     }
     if (["RETRYABLE_ERROR", "TIMED_OUT"].includes(this.record.status)
       || (this.record.status === "PROCESSING" && this.record.leaseExpired)) {
-      this.record = this.#record({ ...this.record, status: "PROCESSING", attempts: this.record.attempts + 1, completedAt: null });
+      this.record = this.#record({
+        ...this.record,
+        status: "PROCESSING",
+        attempts: this.record.attempts + 1,
+        statusChecks: null,
+        completedAt: null,
+      });
       return { claimed: true, record: this.record };
     }
     return { claimed: false, record: this.record };
   }
 
   async markUploaded(fingerprint, publishId) {
-    this.record = this.#record({ ...this.record, fingerprint, publishId, status: "PROCESSING" });
+    this.record = this.#record({
+      ...this.record,
+      fingerprint,
+      publishId,
+      status: "PROCESSING",
+      lastTikTokStatus: "PROCESSING_UPLOAD",
+      statusChecks: null,
+    });
     return this.record;
   }
 
-  async markComplete(fingerprint, status) {
-    this.record = this.#record({ ...this.record, fingerprint, status, retryable: false, completedAt: "2026-08-28T12:00:02.000Z" });
+  async markComplete(fingerprint, status, statusChecks) {
+    this.record = this.#record({
+      ...this.record,
+      fingerprint,
+      status,
+      lastTikTokStatus: status,
+      statusChecks,
+      retryable: false,
+      completedAt: "2026-08-28T12:00:02.000Z",
+    });
     return this.record;
   }
 
-  async markFailed(fingerprint, { code, message, retryable }) {
+  async markFailed(fingerprint, {
+    code,
+    message,
+    retryable,
+    lastTikTokStatus = null,
+    statusChecks = null,
+  }) {
     this.record = this.#record({
       ...this.record,
       fingerprint,
@@ -38,18 +65,22 @@ class MemorySubmissionStore {
       errorCode: code,
       errorMessage: message,
       retryable,
+      lastTikTokStatus: lastTikTokStatus || this.record?.lastTikTokStatus || null,
+      statusChecks,
       completedAt: "2026-08-28T12:00:02.000Z",
     });
     return this.record;
   }
 
-  async markTimedOut(fingerprint) {
+  async markTimedOut(fingerprint, lastTikTokStatus, statusChecks) {
     this.record = this.#record({
       ...this.record,
       fingerprint,
       status: "TIMED_OUT",
       errorCode: "status_timeout",
       retryable: true,
+      lastTikTokStatus,
+      statusChecks,
       completedAt: "2026-08-28T12:00:02.000Z",
     });
     return this.record;
@@ -61,6 +92,8 @@ class MemorySubmissionStore {
       errorCode: null,
       errorMessage: null,
       retryable: false,
+      lastTikTokStatus: null,
+      statusChecks: null,
       createdAt: "2026-08-28T12:00:00.000Z",
       updatedAt: "2026-08-28T12:00:01.000Z",
       completedAt: null,
@@ -86,6 +119,8 @@ test("submits a new video through the existing upload-and-wait workflow", async 
   assert.equal(result.outcome, "complete");
   assert.equal(result.record.publishId, "publish-1");
   assert.equal(result.record.status, "SEND_TO_USER_INBOX");
+  assert.equal(result.record.lastTikTokStatus, "SEND_TO_USER_INBOX");
+  assert.equal(result.record.statusChecks, 3);
 });
 
 test("returns the stored result for duplicate video bytes without uploading", async () => {
@@ -172,26 +207,31 @@ test("persists workflow timeout with its publish_id", async () => {
   assert.equal(result.outcome, "timeout");
   assert.equal(result.record.status, "TIMED_OUT");
   assert.equal(result.record.publishId, "publish-timeout");
+  assert.equal(result.record.lastTikTokStatus, "PROCESSING_UPLOAD");
+  assert.equal(result.record.statusChecks, 4);
 });
 
-test("resumes polling after a logical restart and expired lease without uploading again", async () => {
+test("resumes polling after a timeout without uploading again", async () => {
   const interrupted = {
     fingerprint: "a".repeat(64),
-    status: "PROCESSING",
+    status: "TIMED_OUT",
     publishId: "publish-resume",
     attempts: 1,
     retryable: true,
-    leaseExpired: true,
+    lastTikTokStatus: "PROCESSING_UPLOAD",
+    statusChecks: 56,
     createdAt: "2026-08-28T12:00:00.000Z",
     updatedAt: "2026-08-28T12:00:01.000Z",
     completedAt: "2026-08-28T12:00:02.000Z",
   };
   const store = new MemorySubmissionStore(interrupted);
   let resumedPublishId;
+  let resumedStatus;
   const workflow = {
     uploadAndWait: async () => assert.fail("restart caused a second upload"),
-    async waitForFinalStatus(publishId) {
+    async waitForFinalStatus(publishId, initialStatus) {
       resumedPublishId = publishId;
+      resumedStatus = initialStatus;
       return { outcome: "complete", status: "PUBLISH_COMPLETE", attempts: 2 };
     },
   };
@@ -199,6 +239,8 @@ test("resumes polling after a logical restart and expired lease without uploadin
 
   const result = await service.submit({ filePath: "video.mp4" });
   assert.equal(resumedPublishId, "publish-resume");
+  assert.equal(resumedStatus, "PROCESSING_UPLOAD");
   assert.equal(result.record.status, "PUBLISH_COMPLETE");
   assert.equal(result.record.attempts, 2);
+  assert.equal(result.record.statusChecks, 2);
 });
