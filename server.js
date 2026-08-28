@@ -8,7 +8,7 @@ import { requireApiKey } from "./src/middleware/apiKey.js";
 import { TikTokClient } from "./src/tiktok/client.js";
 import { publicError, TikTokApiError } from "./src/tiktok/errors.js";
 import { MAX_VIDEO_SIZE } from "./src/tiktok/uploadPlan.js";
-import { MemoryTokenStore } from "./src/tokens/memoryTokenStore.js";
+import { PostgresTokenStore } from "./src/tokens/postgresTokenStore.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 10000;
@@ -17,7 +17,11 @@ const uploadDirectory = path.join(tmpdir(), "inaya-tiktok-uploads");
 const configuredMaxSize = Number(process.env.MAX_VIDEO_SIZE_BYTES) || MAX_VIDEO_SIZE;
 const maxVideoSize = Math.min(configuredMaxSize, MAX_VIDEO_SIZE);
 const oauthStates = new Map();
-const tokenStore = new MemoryTokenStore();
+const tokenStore = new PostgresTokenStore({
+  connectionString: process.env.DATABASE_URL,
+  encryptionKey: process.env.TOKEN_ENCRYPTION_KEY,
+});
+await tokenStore.initialize();
 const tiktok = new TikTokClient({
   tokenStore,
   clientKey: process.env.TIKTOK_CLIENT_KEY,
