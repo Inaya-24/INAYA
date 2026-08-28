@@ -9,9 +9,10 @@ const AAD = Buffer.from("inaya:tiktok-tokens:v1", "utf8");
 
 function decodeEncryptionKey(value) {
   if (!value) throw new Error("TOKEN_ENCRYPTION_KEY is required.");
-  const key = /^[0-9a-f]{64}$/i.test(value)
-    ? Buffer.from(value, "hex")
-    : Buffer.from(value.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+  const normalizedValue = value.trim();
+  const key = /^[0-9a-f]{64}$/i.test(normalizedValue)
+    ? Buffer.from(normalizedValue, "hex")
+    : Buffer.from(normalizedValue.replace(/-/g, "+").replace(/_/g, "/"), "base64");
   if (key.length !== 32) throw new Error("TOKEN_ENCRYPTION_KEY must encode exactly 32 bytes.");
   return key;
 }

@@ -59,6 +59,24 @@ test("rejects missing and invalid encryption keys", () => {
   );
 });
 
+test("accepts a 64-character hexadecimal key representing exactly 32 bytes", async () => {
+  const pool = new FakePool();
+  const hexKey = "ab".repeat(32);
+  const store = new PostgresTokenStore({ pool, encryptionKey: hexKey });
+
+  await store.set({ access_token: "access-token-for-test" });
+  assert.equal((await store.get()).access_token, "access-token-for-test");
+});
+
+test("normalizes surrounding whitespace on a 64-character hexadecimal key", async () => {
+  const pool = new FakePool();
+  const hexKey = "cd".repeat(32);
+  const store = new PostgresTokenStore({ pool, encryptionKey: `\n${hexKey}\r\n` });
+
+  await store.set({ access_token: "access-token-for-test" });
+  assert.equal((await store.get()).access_token, "access-token-for-test");
+});
+
 test("detects encrypted token tampering", async () => {
   const pool = new FakePool();
   const store = new PostgresTokenStore({
