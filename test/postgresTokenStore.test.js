@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 import { PostgresTokenStore } from "../src/tokens/postgresTokenStore.js";
 
-class FakePool {
-  constructor() { this.row = null; }
+class FakePool extends EventEmitter {
+  constructor() {
+    super();
+    this.row = null;
+  }
 
   async query(sql, values = []) {
     if (sql.includes("CREATE TABLE")) return { rows: [] };
@@ -86,4 +90,28 @@ test("detects encrypted token tampering", async () => {
   await store.set({ access_token: "access-token-for-test" });
   pool.row.ciphertext = `${pool.row.ciphertext.slice(0, -2)}AA`;
   await assert.rejects(() => store.get());
+});
+
+test("handles idle PostgreSQL connection errors without logging the client", () => {
+  const pool = new FakePool();
+  new PostgresTokenStore({ pool, encryptionKey: randomBytes(32).toString("hex") });
+  const logged = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => logged.push(args);
+
+  try {
+    assert.doesNotThrow(() => pool.emit(
+      "error",
+      new Error("connection terminated unexpectedly"),
+      { password: "database-password-must-not-be-logged" },
+    ));
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.deepEqual(logged, [[
+    "PostgreSQL idle connection error:",
+    "connection terminated unexpectedly",
+  ]]);
+  assert.ok(!JSON.stringify(logged).includes("database-password-must-not-be-logged"));
 });

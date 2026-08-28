@@ -49,6 +49,9 @@ export class PostgresTokenStore {
       ssl: { rejectUnauthorized: true },
       max: 2,
     });
+    this.pool.on("error", (error) => {
+      console.error("PostgreSQL idle connection error:", error?.message || "Unknown connection error.");
+    });
     this.randomBytes = randomBytesImpl;
   }
 
