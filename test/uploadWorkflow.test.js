@@ -149,3 +149,41 @@ test("validates polling configuration", () => {
   assert.throws(() => createUploadWorkflow({ tiktok, pollIntervalMs: 0 }), /pollIntervalMs/);
   assert.throws(() => createUploadWorkflow({ tiktok, timeoutMs: -1 }), /timeoutMs/);
 });
+
+test("runs the upload persistence hook before the first status check", async () => {
+  let persisted = false;
+  const workflow = createUploadWorkflow({
+    tiktok: {
+      uploadVideoFile: async () => ({ publish_id: "publish-hook", status: "PROCESSING_UPLOAD" }),
+      async getPublishStatus() {
+        assert.equal(persisted, true);
+        return { data: { status: "SEND_TO_USER_INBOX" } };
+      },
+    },
+  });
+
+  const result = await workflow.uploadAndWait({}, {
+    async onUploaded(upload) {
+      assert.equal(upload.publish_id, "publish-hook");
+      persisted = true;
+    },
+  });
+  assert.equal(result.status, "SEND_TO_USER_INBOX");
+});
+
+test("resumes status polling for an existing publish_id without uploading", async () => {
+  let statusPublishId;
+  const workflow = createUploadWorkflow({
+    tiktok: {
+      uploadVideoFile: async () => assert.fail("resume attempted a new upload"),
+      async getPublishStatus(publishId) {
+        statusPublishId = publishId;
+        return { data: { status: "PUBLISH_COMPLETE" } };
+      },
+    },
+  });
+
+  const result = await workflow.waitForFinalStatus("publish-resume");
+  assert.equal(statusPublishId, "publish-resume");
+  assert.equal(result.status, "PUBLISH_COMPLETE");
+});

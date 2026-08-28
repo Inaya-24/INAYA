@@ -67,7 +67,14 @@ export function createUploadWorkflow({
     return polling;
   }
 
-  async function uploadAndWait(uploadOptions) {
+  async function waitForFinalStatus(publishId, initialStatus = "PROCESSING_UPLOAD") {
+    if (typeof publishId !== "string" || !publishId) {
+      throw new TypeError("A publish_id is required to poll TikTok status.");
+    }
+    return pollOncePerPublishId(publishId, initialStatus);
+  }
+
+  async function uploadAndWait(uploadOptions, { onUploaded } = {}) {
     const startedAt = now();
     const upload = await tiktok.uploadVideoFile(uploadOptions);
     const publishId = upload?.publish_id;
@@ -75,7 +82,8 @@ export function createUploadWorkflow({
       throw new TypeError("TikTok upload did not return a publish_id.");
     }
 
-    const result = await pollOncePerPublishId(publishId, upload.status);
+    if (onUploaded) await onUploaded(upload);
+    const result = await waitForFinalStatus(publishId, upload.status);
     return {
       publishId,
       ...result,
@@ -83,5 +91,5 @@ export function createUploadWorkflow({
     };
   }
 
-  return { uploadAndWait, maxStatusChecks };
+  return { uploadAndWait, waitForFinalStatus, maxStatusChecks };
 }
