@@ -4,6 +4,10 @@ import { TikTokApiError } from "./errors.js";
 import { createUploadPlan } from "./uploadPlan.js";
 
 const API_BASE = "https://open.tiktokapis.com";
+const VIDEO_LIST_FIELDS = [
+  "id", "create_time", "title", "video_description", "duration", "share_url",
+  "view_count", "like_count", "comment_count", "share_count",
+].join(",");
 
 async function parseJson(response) {
   try { return await response.json(); }
@@ -100,6 +104,49 @@ export class TikTokClient {
     return this.apiRequest("/v2/user/info/?fields=open_id,display_name,avatar_url");
   }
 
+  async listVideos({ cursor, maxCount = 20 } = {}) {
+    const body = { max_count: maxCount };
+    if (cursor !== undefined) body.cursor = cursor;
+    const result = await this.apiRequest(`/v2/video/list/?fields=${VIDEO_LIST_FIELDS}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    if (!result.data || !Array.isArray(result.data.videos)) {
+      throw new TikTokApiError("TikTok returned an invalid video list.", {
+        status: 502,
+        code: "invalid_video_list_response",
+        retryable: true,
+      });
+    }
+    const videos = result.data.videos.flatMap((video) => {
+      if (!video || typeof video.id !== "string" || !video.id) return [];
+      return [{
+        id: video.id,
+        create_time: Number.isSafeInteger(video.create_time) ? video.create_time : null,
+        title: typeof video.title === "string" ? video.title : null,
+        video_description: typeof video.video_description === "string" ? video.video_description : null,
+        duration: nonNegativeInteger(video.duration),
+        share_url: safeHttpsUrl(video.share_url),
+        view_count: nonNegativeInteger(video.view_count),
+        like_count: nonNegativeInteger(video.like_count),
+        comment_count: nonNegativeInteger(video.comment_count),
+        share_count: nonNegativeInteger(video.share_count),
+      }];
+    });
+    if (result.data.videos.length > 0 && videos.length === 0) {
+      throw new TikTokApiError("TikTok returned an invalid video list.", {
+        status: 502,
+        code: "invalid_video_list_response",
+        retryable: true,
+      });
+    }
+    return {
+      videos,
+      cursor: Number.isSafeInteger(result.data.cursor) ? result.data.cursor : null,
+      has_more: result.data.has_more === true,
+    };
+  }
+
   async initializeVideoUpload(videoSize) {
     const plan = createUploadPlan(videoSize);
     const result = await this.apiRequest("/v2/post/publish/inbox/video/init/", {
@@ -148,5 +195,19 @@ export class TikTokClient {
 
   async getPublishStatus(publishId) {
     return this.apiRequest("/v2/post/publish/status/fetch/", { method: "POST", body: JSON.stringify({ publish_id: publishId }) });
+  }
+}
+
+function nonNegativeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function safeHttpsUrl(value) {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
   }
 }

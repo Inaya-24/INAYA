@@ -28,3 +28,11 @@ second time. If the process restarts after TikTok returns a `publish_id`, a late
 resumes status polling without uploading the video again. `AGENT_VIDEO_LEASE_MS` controls
 when an interrupted submission can be reclaimed and defaults to the TikTok status timeout
 plus one minute.
+
+## TikTok performance read endpoint
+
+`GET /tiktok/videos/list` is an API-key-protected server endpoint for JARVIS. It uses the
+existing encrypted TikTok token and the official TikTok v2 `video.list` API. Optional query
+parameters are `cursor` and `max_count` (1–20). The response contains `data.videos`,
+`data.cursor`, and `data.has_more`; unavailable metrics are returned as `null`, never as a
+fabricated zero. Existing TikTok users must authorize the added `video.list` scope once.

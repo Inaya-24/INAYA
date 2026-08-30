@@ -12,6 +12,7 @@ import { TikTokClient } from "./src/tiktok/client.js";
 import { publicError, TikTokApiError } from "./src/tiktok/errors.js";
 import { MAX_VIDEO_SIZE } from "./src/tiktok/uploadPlan.js";
 import { createUploadWorkflow } from "./src/tiktok/uploadWorkflow.js";
+import { createVideoListHandler } from "./src/tiktok/videoListRoute.js";
 import { PostgresTokenStore } from "./src/tokens/postgresTokenStore.js";
 
 const app = express();
@@ -75,7 +76,7 @@ app.get("/auth/tiktok", (req, res) => {
   const authUrl = new URL("https://www.tiktok.com/v2/auth/authorize/");
   authUrl.search = new URLSearchParams({
     client_key: process.env.TIKTOK_CLIENT_KEY,
-    scope: "user.info.basic,video.upload",
+    scope: "user.info.basic,video.upload,video.list",
     response_type: "code",
     redirect_uri: redirectUri,
     state,
@@ -109,6 +110,12 @@ app.get("/tiktok/me", async (req, res) => {
     res.status(err.status || 500).json(publicError(err));
   }
 });
+
+app.get(
+  "/tiktok/videos/list",
+  requireApiKey(process.env.INAYA_API_KEY),
+  createVideoListHandler(tiktok),
+);
 
 async function validateMp4Container(filePath) {
   const handle = await open(filePath, "r");
